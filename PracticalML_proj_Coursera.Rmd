@@ -1,0 +1,153 @@
+---
+title: "Predicting Classe: A Practical Machine Learning Project"
+author: "Elmer C. Peramo"
+date: "12/6/2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Background
+Using devices such as *Jawbone Up, Nike FuelBand*, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how *much* of a particular activity they do, but they rarely quantify *how well they do it*. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset).
+
+
+## Initial Preparation and Data Analysis
+Loading the necessary packages for this project:
+```{r prep}
+library(dplyr)
+library(lubridate)
+library(caret)
+library(rpart)
+library(rpart.plot)
+library(rattle)
+library(randomForest)
+library(ggplot2)
+```
+
+## Data Loading
+The training data for this project are available here:
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+
+The test data are available here:
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+The data for this project come from this source: http://groupware.les.inf.puc-rio.br/har. If you use the document you create for this class for any purpose please cite them as they have been very generous in allowing their data to be used for this kind of assignment.
+
+Assuming that I have already downloaded the pml-training.csv and pml-testing.csv and have set the working directory to where I've saved these files:
+```{r dload}
+dtrain<- read.csv("pml-training.csv", na.strings = c("NA", "#DIV/0!", ""))
+dtest<- read.csv("pml-testing.csv", na.strings = c("NA", "#DIV/0!", ""))
+```
+
+## Exploratory Data Analyses
+### Dimensions
+```{r dim}
+dim(dtrain)
+```
+### Structure
+```{r str}
+str(dtrain)
+```
+### Samples
+```{r head}
+head(dtrain)
+```
+### Descriptive Stats
+```{r summary}
+summary(dtrain)
+```
+### Transformation
+```{r date}
+dtrain$cvtd_timestamp<- as.Date(dtrain$cvtd_timestamp, format = "%m/%d/%Y %H:%M")
+dtrain$Day<-factor(weekdays(dtrain$cvtd_timestamp))
+```
+
+### Looking for insights
+```{r insight}
+table(dtrain$classe) 
+prop.table(table(dtrain$classe)) 
+table(dtrain$user_name) 
+prop.table(table(dtrain$user_name)) 
+```
+
+### Cleaning
+```{r clean1}
+# Deleting unrelated fields
+classe<- dtrain$classe
+bad_col<- grepl("^X|timestamp|window", names(dtrain))
+dtrain<- dtrain[, !bad_col]
+dtrain<- dtrain[, sapply(dtrain, is.numeric)]
+dtrain$classe<- classe
+bad_col<- grepl("^X|timestamp|window", names(dtest))
+dtest<- dtest[, !bad_col]
+dtest<- dtest[, sapply(dtest, is.numeric)]
+
+```
+
+```{r clean2}
+# Deleting fields with missing values
+dtrain <- dtrain[, colSums(is.na(dtrain)) == 0]
+dtest <- dtest[, colSums(is.na(dtest)) == 0] 
+```
+
+## Partition Data for Training and Testing
+```{r partition}
+set.seed(1125)
+Trn <- createDataPartition(dtrain$classe, p=0.72, list=F)
+train <- dtrain[Trn, ]
+test <- dtrain[-Trn, ]
+dim(train)
+dim(test)
+```
+
+## Using ML Algorithms
+Because of time and resource constraints, I'm just going to use two ML algorithms and choose between the two which to implment in the test set.
+### Decision Trees
+I used cross validation with k=6.
+```{r tree}
+train_c <- trainControl(method="cv", number=6)
+c_tree <- train(classe~., data=train, method="rpart", trControl=train_c)
+fancyRpartPlot(c_tree$finalModel)
+tr_pred <- predict(c_tree,newdata=test)
+cm_ctree <- confusionMatrix(test$classe,tr_pred)
+
+# confusion matrix and accuracy
+cm_ctree$table
+cm_ctree$overall[1]
+```
+
+### Random Forest
+```{r rf}
+c_rf <- train(classe~., data=train, method="rf", ntree=8, importance=TRUE, prox=TRUE, trControl=train_c)
+c_rf
+fr_pred <- predict(c_rf,newdata=test)
+cm_rf <-confusionMatrix(test$classe,fr_pred) 
+cm_rf$table
+cm_rf$overall[1]
+```
+### Getting a Single Tree
+```{r rftree}
+getTree(c_rf$finalModel, k=2)
+```
+
+### Class Centers
+```{r rfcenters}
+data <- classCenter(train[,c(1,2)], train$classe, c_rf$finalModel$prox)
+data <- as.data.frame(data);data$classe <- rownames(data)
+p <- qplot(roll_belt,pitch_belt,color=classe, data = train)
+p + geom_point(aes(x=roll_belt,y=pitch_belt,col=classe),size=5,shape=4,data = data)
+```
+
+
+
+## Conclusion
+Comparing the two algorithms, it clearly shows that Random Forest is the better model. So, I will use it to predict the values of classe in the untouched test data set.
+```{r conclusion}
+
+validation <- predict(c_rf,newdata=dtest)
+validation
+```
